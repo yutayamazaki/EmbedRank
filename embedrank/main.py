@@ -1,19 +1,18 @@
-from gensim.models import Doc2Vec, Word2Vec
-import MeCab
+from gensim.models.doc2vec import Doc2Vec
 
 from embedrank import EmbedRank
-
+from nlp_utils import tokenize
 
 if __name__ == '__main__':
-    doc2vec = Doc2Vec.load('jawiki_doc2vec_dmpv200d.model')
-    word2vec = Word2Vec.load('jawiki_word2vec_200d.model')
-    tagger = MeCab.Tagger('-d /usr/local/lib/mecab/dic/mecab-ipadic-neologd')
+    model = Doc2Vec.load('jawiki_doc2vec_dmpv200d.model')
+    embedrank = EmbedRank(model=model, tokenize=tokenize)
 
-    embed_rank = EmbedRank(tagger, doc2vec, word2vec)
-    text = 'EmbedRankという，単一文書からの教師なしキーフレーズ抽出'
+    text = """バーレーンの首都マナマ(マナーマとも)で現在開催されている
+    ユネスコ(国際連合教育科学文化機関)の第42回世界遺産委員会は日本の推薦していた
+    「長崎と天草地方の潜伏キリシタン関連遺産」 (長崎県、熊本県)を30日、
+    世界遺産に登録することを決定した。文化庁が同日発表した。
+    日本国内の文化財の世界遺産登録は昨年に登録された福岡県の
+    「『神宿る島』宗像・沖ノ島と関連遺産群」に次いで18件目。
+    2013年の「富士山-信仰の対象と芸術の源泉」の文化遺産登録から6年連続となった。"""
 
-    keywords = embed_rank.extract_keywords(text, mmr=True)
-    print(keywords)
-
-    keywords = embed_rank.extract_keywords(text, mmr=False)
-    print(keywords)
+    print(embedrank.extract_keyword(text))

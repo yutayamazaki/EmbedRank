@@ -1,98 +1,67 @@
 import numpy as np
+from gensim.models.doc2vec import Doc2Vec
 from sklearn.metrics.pairwise import cosine_similarity
+
+from nlp_utils import extract_keyphrase_candidates, tokenize
 
 
 class EmbedRank:
-    """ Implementation of EmbedRank and EmbedRank++ introduced
-        https://arxiv.org/abs/1801.04470.
 
-    Parameters
-    ----------
-    tagger: MeCab.Tagger
-        Tokenizer for Japanese.
-    
-    doc2vec: gensim.models.Doc2Vec
+    def __init__(self, model, tokenize, l=0.80):
+        self.model = model
+        self.tokenize = tokenize
+        self.l = l
 
-    word2vec: gensim.models.Word2Vec
-    """
+    def extract_keyword(self, text, top_k=5):
+        self.top_k = int(top_k)
 
-    def __init__(self, tagger, doc2vec, word2vec, alpha=0.8):
-        self.tagger = tagger
-        self.d2v = doc2vec
-        self.w2v = word2vec
-        self.alpha = alpha
+        phrases, phrase_embeds, doc_embed = self._calc_embeddings(text)
+        if not phrases:
+            return []
+        phrase_indices, doc_similarity = self._mmr(phrases, phrase_embeds, doc_embed)
 
-    def extract_keywords(self, doc: str, top_k=10, mmr=True):
-        sentense_embed = self._calc_sentence_embedding(doc)
-        candicates = self._get_keyphrase_candidates(doc)
-        word_embed = self._calc_word_embedding(candicates)
+        output = []
+        for idx in phrase_indices:
+            output.append((phrases[idx], doc_similarity[idx][0]))
+        return output
 
-        if mmr:
-            similarities = self._mmr(sentense_embed, word_embed)
-        else:
-            similarities = []
-            for w, w_vec in word_embed.items():
-                sim_score = cosine_similarity(w_vec.reshape(1, -1), sentense_embed.reshape(1, -1))
-                similarities.append((w, sim_score))
+    def _calc_embeddings(self, document):
+        doc_embed = self.model.infer_vector(self.tokenize(document))
 
-        similarities.sort(key=lambda x: x[1], reverse=True)
+        phrases = []
+        phrase_embeds = []
+        for candidate_tokens in extract_keyphrase_candidates(document):
+            candidate_text = ''.join(candidate_tokens)
+            phrases.append(candidate_text)
+            phrase_embeds.append(self.model.infer_vector(candidate_tokens))
+        phrase_embeds = np.array(phrase_embeds)
 
-        return similarities[:top_k]
-    
-    def _mmr(self, sentense_embed, word_embed):
-        candidates = []
-        for c_i, c_i_embed in word_embed.items():
-            sim_1 = cosine_similarity(c_i_embed.reshape(1, -1), sentense_embed.reshape(1, -1))
+        if len(phrases) == 0:
+            return [], [], doc_embed
+        if len(phrases) < self.top_k:
+            self.top_k = len(self.phrases)
 
-            sim_2 = []
-            for c_j, c_j_embed in word_embed.items():
-                if c_i != c_j:
-                    sim_2.append(cosine_similarity(c_i_embed.reshape(1, -1), c_j_embed.reshape(1, -1)))
+        return phrases, phrase_embeds, doc_embed
 
-            candidates.append((c_i, self.alpha*sim_1 - (1-self.alpha)*np.max(sim_2)))
+    def _mmr(self, phrases, phrase_embeds, doc_embed):
 
-        return candidates
+        doc_similarity = cosine_similarity(phrase_embeds, doc_embed.reshape(1, -1))
+        phrase_similarity_matrix = cosine_similarity(phrase_embeds)
 
-    def _get_keyphrase_candidates(self, doc: str) -> list:
-        return self._tokenize(doc)
+        unselected = list(range(len(phrases)))
+        select_idx = np.argmax(doc_similarity)
 
-    def _calc_sentence_embedding(self, doc: str) -> np.ndarray:
-        words = self._tokenize(doc)
-        sent_embed = self.d2v.infer_vector(words)
-        return sent_embed
+        selected = [select_idx]
+        unselected.remove(select_idx)
 
-    def _calc_word_embedding_(self, candidates: list) -> dict:
-        vectors = {}
-        for c in candidates:
-            try:
-                v = self.w2v.wv[c]
-            except Exception as e:
-                continue
-            vectors[c] = v
-        return vectors
+        for _ in range(self.top_k - 1):
+            mmr_distance_to_doc = doc_similarity[unselected, :]
+            mmr_distance_between_phrases = np.max(phrase_similarity_matrix[unselected][:, selected], axis=1)
 
-    def _calc_word_embedding(self, candidates: list) -> dict:
-        vectors = {}
-        for c in candidates:
-            try:
-                v = self.d2v.infer_vector([c])
-            except Exception as e:
-                continue
-            vectors[c] = v
-        return vectors
+            mmr = self.l * mmr_distance_to_doc - (1 - self.l) * mmr_distance_between_phrases.reshape(-1, 1)
+            mmr_idx = unselected[np.argmax(mmr)]
 
-    def _tokenize(self, doc: str, attr=['名詞', '形容詞']) -> list:
-        result = []
-        node = self.tagger.parseToNode(doc)
-        while node:
-            if node.feature.split(',')[6] == '*':
-                word = node.surface
-            else:
-                word = node.feature.split(',')[6]
+            selected.append(mmr_idx)
+            unselected.remove(mmr_idx)
 
-            part = node.feature.split(',')[0]
-
-            if part in attr:
-                result.append(word)
-            node = node.next
-        return result
+        return selected, doc_similarity
