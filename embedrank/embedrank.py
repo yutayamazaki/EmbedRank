@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.spatial import distance
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class EmbedRank:
@@ -15,7 +15,7 @@ class EmbedRank:
 
     word2vec: gensim.models.Word2Vec
     """
-    
+
     def __init__(self, tagger, doc2vec, word2vec, alpha=0.8):
         self.tagger = tagger
         self.d2v = doc2vec
@@ -32,7 +32,7 @@ class EmbedRank:
         else:
             similarities = []
             for w, w_vec in word_embed.items():
-                sim_score = self._cosine_similarity(w_vec, sentense_embed)
+                sim_score = cosine_similarity(w_vec.reshape(1, -1), sentense_embed.reshape(1, -1))
                 similarities.append((w, sim_score))
 
         similarities.sort(key=lambda x: x[1], reverse=True)
@@ -42,12 +42,12 @@ class EmbedRank:
     def _mmr(self, sentense_embed, word_embed):
         candidates = []
         for c_i, c_i_embed in word_embed.items():
-            sim_1 = self._cosine_similarity(c_i_embed, sentense_embed)
+            sim_1 = cosine_similarity(c_i_embed.reshape(1, -1), sentense_embed.reshape(1, -1))
 
             sim_2 = []
             for c_j, c_j_embed in word_embed.items():
                 if c_i != c_j:
-                    sim_2.append(self._cosine_similarity(c_i_embed, c_j_embed))
+                    sim_2.append(cosine_similarity(c_i_embed.reshape(1, -1), c_j_embed.reshape(1, -1)))
 
             candidates.append((c_i, self.alpha*sim_1 - (1-self.alpha)*np.max(sim_2)))
 
@@ -61,7 +61,7 @@ class EmbedRank:
         sent_embed = self.d2v.infer_vector(words)
         return sent_embed
 
-    def _calc_word_embedding(self, candidates: list) -> dict:
+    def _calc_word_embedding_(self, candidates: list) -> dict:
         vectors = {}
         for c in candidates:
             try:
@@ -70,9 +70,16 @@ class EmbedRank:
                 continue
             vectors[c] = v
         return vectors
-    
-    def _cosine_similarity(self, v: np.ndarray, w: np.ndarray) -> np.ndarray:
-        return 1 - distance.cosine(w, v)
+
+    def _calc_word_embedding(self, candidates: list) -> dict:
+        vectors = {}
+        for c in candidates:
+            try:
+                v = self.d2v.infer_vector([c])
+            except Exception as e:
+                continue
+            vectors[c] = v
+        return vectors
 
     def _tokenize(self, doc: str, attr=['名詞', '形容詞']) -> list:
         result = []
