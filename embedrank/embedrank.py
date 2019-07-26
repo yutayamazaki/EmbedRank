@@ -39,7 +39,7 @@ class EmbedRank:
         if len(phrases) == 0:
             return [], [], doc_embed
         if len(phrases) < self.top_k:
-            self.top_k = len(self.phrases)
+            self.top_k = len(phrases)
 
         return phrases, phrase_embeds, doc_embed
 
